@@ -1,7 +1,10 @@
+from curses import window
 import random
 import socket
 import math
 import time
+import SlidingWindow
+
 class SocketTCP:
     def __init__(self):
         """
@@ -23,6 +26,7 @@ class SocketTCP:
         self.temp = bytearray()
         self.DEBUG = True
         self.ERROR_DEBUG = True
+        self.window_size = 3
 
     def parse_segment(self, segment):
         """
@@ -137,6 +141,33 @@ class SocketTCP:
                             print(self.success_address)
                         self.socket_tcp.close()
                         return new_socket, self.success_address
+    def send(self, message: str, mode=0):
+        """
+        mode:
+            0 = stop and wait
+            1 = go-back-n
+            2 = Selective Repeat
+        """
+        send_options = \
+            [self.send_using_stop_and_wait,
+            self.recv_using_go_back_n,
+            self.recv_using_selective_repeat]
+
+        send_options[mode](message)
+
+    def recv(self, buff_size, mode=0):
+        """
+        mode
+            0 = stop and wait
+            1 = go-back-n
+            2 = Selective Repeat
+        """
+        recv_options = \
+                [self.recv_using_stop_and_wait,
+                self.recv_using_go_back_n,
+                self.recv_using_selective_repeat]
+
+        return recv_options[mode](buff_size)
 
     def send_using_stop_and_wait(self, message: str):
         self.socket_tcp.settimeout(5)
@@ -174,7 +205,33 @@ class SocketTCP:
                 except Exception as e:
                     if self.ERROR_DEBUG: print(f"<-- RECEIVING ACK FAILED, SENDING MESSAGE AGAIN --", end="\n\n")
 
-    def recv_using_stop_and_wait(self, buff_size):     
+    def send_using_go_back_n(self, message: str):
+        self.socket_tcp.settimeout(5)
+        # message setup
+        encoded_message = message.encode()
+        message_length = len(encoded_message)
+
+        # init message setup
+        init_message = str(message_length)
+
+        # slicing messages in 16 bytes
+        sliced_data = [self.create_segment(1, 1, 1, self.seq, init_message)] #data_list
+        windows_range = 2*self.window_size
+        for i in range(0, math.ceil(message_length/16)):
+            slice_encoded_message = encoded_message[i*16:min((i+1)*16, message_length)]
+            sliced_data.append(self.create_segment(0, 0, 0, self.seq + (1 + i)%windows_range, slice_encoded_message.decode()))
+        
+        data_window = SlidingWindow.SlidingWindow(self.window_size, sliced_data, self.seq)
+        last_ack_received = None
+        time_last_sended_message = time.time()
+        timeout = False
+        
+
+    
+    def send_using_selective_repeat(self, message: str):
+        pass
+
+    def recv_using_stop_and_wait(self, buff_size: int):     
         if len(self.temp) >= buff_size:
             ans = self.temp[:buff_size]
             self.temp = self.temp[buff_size:]
@@ -244,7 +301,13 @@ class SocketTCP:
             if self.message_length == 0:
                 self.message_length = None
             return ans
-            
+    
+    def recv_using_go_back_n(self, buff_size: int):
+        pass
+    
+    def recv_using_selective_repeat(self, buff_size: int):
+        pass
+
     def close(self):
         
         seq = self.seq
