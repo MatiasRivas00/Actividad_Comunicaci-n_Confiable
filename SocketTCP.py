@@ -226,7 +226,7 @@ class SocketTCP:
         time_last_sended_message = time.time()
         timeout = False
         while data_window.get_data(0) is not None:
-            time_out = False
+            timeout = False
             for i in range(self.window_size):
                 seq_number = data_window.get_sequence_number(i)
                 if seq_number is None: break
@@ -245,7 +245,7 @@ class SocketTCP:
                     
                     if data_window.get_data(0) is None: break
                 except:
-                    time_out = True
+                    timeout = True
         
 
     
