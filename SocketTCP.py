@@ -222,9 +222,30 @@ class SocketTCP:
             sliced_data.append(self.create_segment(0, 0, 0, self.seq + (1 + i)%windows_range, slice_encoded_message.decode()))
         
         data_window = SlidingWindow.SlidingWindow(self.window_size, sliced_data, self.seq)
-        last_ack_received = None
+        temp_seq = self.seq
         time_last_sended_message = time.time()
         timeout = False
+        while data_window.get_data(0) is not None:
+            time_out = False
+            for i in range(self.window_size):
+                seq_number = data_window.get_sequence_number(i)
+                if seq_number is None: break
+                if self.DEBUG: print(f"-- SENDING MESSAGE, seq = {seq_number} -->", end="\n\n")
+                self.socket_tcp.sendto(data_window.get_data(i), self.send_to)
+            while not timeout:
+                try:
+                    ack_message, ad = self.socket_tcp.recvfrom(1024) # self.seq + 1 is needed to continue
+                    syn, ack, fin, rec_seq, data = self.parse_segment(ack_message.decode())
+                    for j in range(rec_seq - temp_seq + 1):
+                        data_window.move_window(1)
+                        seq_number = data_window.get_sequence_number(self.window_size - 1)
+                        if seq_number is None: break
+                        if self.DEBUG: print(f"-- SENDING MESSAGE, seq = {seq_number} -->", end="\n\n")
+                        self.socket_tcp.sendto(data_window.get_data(self.window_size - 1), self.send_to)
+                    
+                    if data_window.get_data(0) is None: break
+                except:
+                    time_out = True
         
 
     
