@@ -1,4 +1,3 @@
-from curses import window
 import random
 import socket
 import math
@@ -27,6 +26,8 @@ class SocketTCP:
         self.DEBUG = True
         self.ERROR_DEBUG = True
         self.window_size = 3
+        self.init_seq = None
+        self.seq_win = 0
 
     def parse_segment(self, segment):
         """
@@ -71,6 +72,7 @@ class SocketTCP:
                 if (syn, ack, fin, rec_seq) == (1, 1, 0, self.seq + 1):
                     if self.DEBUG: print(f"-- SENDING ACK, seq = {self.seq + 1} -->", end="\n\n")
                     self.seq = rec_seq + 1
+                    self.init_seq = self.seq
                     ack_message = self.create_segment(0, 1, 0, self.seq, "")
                     self.socket_tcp.sendto(ack_message.encode(), address)
                     self.send_to = eval(data)
@@ -125,6 +127,7 @@ class SocketTCP:
                         new_socket.socket_tcp.settimeout(5)
                         new_socket.send_to = self.send_to
                         new_socket.seq = rec_seq
+                        new_socket.init_seq = rec_seq
                         if self.DEBUG: 
                             print("--- ESTABLISHED CONNECTION ---")
                             print(self.success_address)
@@ -150,8 +153,8 @@ class SocketTCP:
         """
         send_options = \
             [self.send_using_stop_and_wait,
-            self.recv_using_go_back_n,
-            self.recv_using_selective_repeat]
+            self.send_using_go_back_n,
+            self.send_using_selective_repeat]
 
         send_options[mode](message)
 
@@ -231,17 +234,20 @@ class SocketTCP:
                 seq_number = data_window.get_sequence_number(i)
                 if seq_number is None: break
                 if self.DEBUG: print(f"-- SENDING MESSAGE, seq = {seq_number} -->", end="\n\n")
-                self.socket_tcp.sendto(data_window.get_data(i), self.send_to)
+                self.socket_tcp.sendto(data_window.get_data(i).encode(), self.send_to)
             while not timeout:
                 try:
-                    ack_message, ad = self.socket_tcp.recvfrom(1024) # self.seq + 1 is needed to continue
+                    ack_message, ad = self.socket_tcp.recvfrom(1024) # self.seq is needed to continue
                     syn, ack, fin, rec_seq, data = self.parse_segment(ack_message.decode())
+                    if self.DEBUG: print(f"-- RECEIVING ACK MESSAGE, seq = {rec_seq} -->", end="\n\n")
                     for j in range(rec_seq - temp_seq + 1):
                         data_window.move_window(1)
                         seq_number = data_window.get_sequence_number(self.window_size - 1)
                         if seq_number is None: break
                         if self.DEBUG: print(f"-- SENDING MESSAGE, seq = {seq_number} -->", end="\n\n")
-                        self.socket_tcp.sendto(data_window.get_data(self.window_size - 1), self.send_to)
+                        self.socket_tcp.sendto(data_window.get_data(self.window_size - 1).encode(), self.send_to)
+                    temp_seq = 0#CORREGIR
+
                     
                     if data_window.get_data(0) is None: break
                 except:
@@ -324,7 +330,73 @@ class SocketTCP:
             return ans
     
     def recv_using_go_back_n(self, buff_size: int):
-        pass
+        if len(self.temp) >= buff_size:
+            ans = self.temp[:buff_size]
+            self.temp = self.temp[buff_size:]
+            return ans
+        else:
+            ok = False
+            while not ok:
+                try:    
+                    em_message, sender_address = self.socket_tcp.recvfrom(1024)
+                    syn, ack, fin, rec_seq, data = self.parse_segment(em_message.decode())
+                    if self.DEBUG: print(f"<-- RECEIVING MESSAGE, seq = {rec_seq} -- expected = {self.seq}", end="\n\n")
+
+                    if (syn, ack, fin, rec_seq, data) == (0, 0, 1, self.seq, ""):
+                        if self.DEBUG: print(f"<-- FIN MESSAGE, seq = {rec_seq} --", end="\n\n")
+                        fin_ack_message = self.create_segment(0, 1, 1, self.seq + 1, "")
+                        MAX_ATTEMPS = 3
+                        curr_attemps = 0
+                        self.seq = self.seq + 1
+                        while True:
+                            try:
+                                if self.DEBUG: print(f"-- SENDING FIN + ACK, seq = {self.seq} -->", end="\n\n")
+                                self.socket_tcp.sendto(fin_ack_message.encode(), self.send_to)
+
+                                
+                                ack_message, client_adress = self.socket_tcp.recvfrom(1024)
+                                syn, ack, fin, rec_seq, data = self.parse_segment(ack_message.decode()) # <- expected seq + 2
+                                if self.DEBUG: print(f"<-- RECEIVING ACK, seq = {rec_seq} --", end="\n\n")
+
+                                if (syn, ack, fin, rec_seq, data) == (0, 1, 0, self.seq + 1, ""):
+                                    self.seq = self.seq + 1
+                                    self.socket_tcp.close()
+                                    if self.DEBUG: print("--- CONNECTION CLOSED ---")
+                                    return
+                            except Exception as e: 
+                                curr_attemps += 1
+                                if curr_attemps >= MAX_ATTEMPS:
+                                    self.seq = self.seq + 1
+                                    self.socket_tcp.close()
+                                    if self.ERROR_DEBUG: 
+                                        print(f"--- MAXIMUM NUMBER OF ATTEMPTS ACHIEVED ---", end="\n\n")
+                                        print("--- CONNECTION CLOSED ---")
+                                    return
+                                if self.ERROR_DEBUG: print(f"<-- RECEIVING ACK FAILED, TRYING AGAIN --", end="\n\n")
+                    if rec_seq == self.seq:
+                        if (syn, ack, fin) == (0, 0, 0):
+                            self.temp.extend(data.encode())
+                            self.message_length = self.message_length - len(data.encode())
+                            ok = not (len(self.temp) < buff_size and self.message_length > 0)
+                        elif (syn, ack, fin) == (1, 1, 1):
+                            self.message_length = int(data)
+                        
+                        if self.DEBUG: print(f"-- SENDING ACK, seq = {self.seq} -->", end="\n\n")
+
+                        ack_message = self.create_segment(0, 1, 0, self.seq, "")
+                        self.socket_tcp.sendto(ack_message.encode(), self.send_to)
+
+                        self.seq_win = (self.seq_win + 1)%(2*self.window_size)
+                        self.seq = self.init_seq + self.seq_win
+
+                except Exception as e:
+                    if self.ERROR_DEBUG: print(f"<-- RECEIVING MESSAGE FAILED, TRYING AGAIN --", end="\n\n")
+
+            ans = self.temp[:min(buff_size, len(self.temp))]
+            self.temp = self.temp[min(buff_size, len(self.temp)):]
+            if self.message_length == 0:
+                self.message_length = None
+            return ans
     
     def recv_using_selective_repeat(self, buff_size: int):
         pass
