@@ -218,17 +218,17 @@ class SocketTCP:
         init_message = str(message_length)
 
         # slicing messages in 16 bytes
-        temp_seq = self.seq
+        LA = self.seq
         
         sliced_data = [self.create_segment(1, 1, 1, self.seq, init_message)] #data_list
         windows_range = 2*self.window_size
         for i in range(0, math.ceil(message_length/16)):
             slice_encoded_message = encoded_message[i*16:min((i+1)*16, message_length)]
-            self.seq = temp_seq + (1 + i)%(windows_range)
+            self.seq = LA + (1 + i)%(windows_range)
             sliced_data.append(self.create_segment(0, 0, 0, self.seq, slice_encoded_message.decode()))
         self.seq = self.seq + 1
-
-        data_window = SlidingWindow.SlidingWindow(self.window_size, sliced_data, temp_seq)
+        data_window = SlidingWindow.SlidingWindow(self.window_size, sliced_data, LA)
+        LA = LA - 1
         timeout = False
         while data_window.get_data(0) is not None:
             timeout = False
@@ -242,15 +242,18 @@ class SocketTCP:
                     ack_message, ad = self.socket_tcp.recvfrom(1024) # self.seq is needed to continue
                     syn, ack, fin, rec_seq, data = self.parse_segment(ack_message.decode())
                     if self.DEBUG: print(f"-- RECEIVING ACK MESSAGE, seq = {rec_seq} -->", end="\n\n")
-
-                    
-                    for j in range(abs(rec_seq - temp_seq)%self.window_size + 1):
+                    moves = 0
+                    if LA <= rec_seq:
+                        moves = rec_seq - LA # Ej: LA = 13, A = 14 => windows moves 1
+                    if LA > rec_seq:
+                        moves = (2*self.window_size - LA) + rec_seq 
+                    for j in range(moves): # 9 10 11 12 13 14 9 10 11 12 13 14
                         data_window.move_window(1)
                         seq_number = data_window.get_sequence_number(self.window_size - 1)
                         if seq_number is None: break
                         if self.DEBUG: print(f"-- SENDING MESSAGE, win_seq = {seq_number} -->", end="\n\n")
                         self.socket_tcp.sendto(data_window.get_data(self.window_size - 1).encode(), self.send_to)
-                    temp_seq = rec_seq + 1
+                    LA = rec_seq # Last Acknowledge
 
                     
                     if data_window.get_data(0) is None: break
