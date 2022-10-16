@@ -1,9 +1,12 @@
+import time
+
+
 class SlidingWindow:
     """Esta clase le permite crear ventanas deslizantes.
     Puede crear una ventana vacía con:
     SlidingWindow(window_size, [], initial_seq)."""
 
-    def __init__(self, window_size, data_list, initial_seq):
+    def __init__(self, window_size, data_list, initial_seq, timeout=5):
         """Construye una ventana de tamaño window_size, usando los datos de
         data_list y número de secuencia inicial initial_seq (Y = initial_seq)."""
 
@@ -21,6 +24,7 @@ class SlidingWindow:
         self.window_size = window_size
         self.data_list = data_list
         self.initial_seq = initial_seq
+        self.timeout = timeout
 
         self.possible_sequence_numbers = []
         for i in range(2 * self.window_size):
@@ -30,11 +34,12 @@ class SlidingWindow:
         i = 0
         for i in range(self.window_size):
             if i >= len(self.data_list):
-                self.window.append({"data": None, "seq": None, 'is_received': None})
+                self.window.append({"data": None, "seq": None, 'is_received': None, "send_time": 0})
             else:
                 self.window.append({"data": self.data_list[i],
                                     "seq": self.possible_sequence_numbers[i % (2 * self.window_size)],
-                                    "is_received": False
+                                    "is_received": False,
+                                    "send_time": 0
                                     })
         self.data_start_index = i + 1
 
@@ -57,11 +62,12 @@ class SlidingWindow:
 
         for i in range(self.data_start_index, (self.window_size - len(new_window)) + self.data_start_index):
             if i >= len(self.data_list):
-                new_window.append({"data": None, "seq": None, "is_received": None})
+                new_window.append({"data": None, "seq": None, "is_received": None, "send_time": 0})
             else:
                 new_window.append({"data": self.data_list[i],
                                    "seq": self.possible_sequence_numbers[i % (2 * self.window_size)],
-                                   "is_received": False
+                                   "is_received": False,
+                                   "send_time": 0
                                    })
             self.data_start_index += 1
 
@@ -88,14 +94,47 @@ class SlidingWindow:
             raise Exception("ERROR in SlidingWindow, get_data(): Invalid index window_index")
         except TypeError:
             raise Exception("ERROR in SlidingWindow, get_data(): Index window_index must be an Integer")
+    
+    def start_timer(self, window_index):
+        """Entrega los datos contenidos en el elemento almacenado en la posición
+        window_index de la ventana."""
+
+        try:
+            self.window[window_index]["send_time"] = time.time()
+        except IndexError:
+            raise Exception("ERROR in SlidingWindow, get_data(): Invalid index window_index")
+        except TypeError:
+            raise Exception("ERROR in SlidingWindow, get_data(): Index window_index must be an Integer")
+
+    def set_received(self, window_index):
+        """Entrega el estado de los contenidos en el elemento almacenado en la posición
+        window_index de la ventana."""
+
+        try:
+            self.window[window_index]["is_received"] = True
+        except IndexError:
+            raise Exception("ERROR in SlidingWindow, get_is_received(): Invalid index window_index")
+        except TypeError:
+            raise Exception("ERROR in SlidingWindow, get_is_received(): Index window_index must be an Integer")
 
 
-    def get_is_received(self, window_index):
+    def is_received(self, window_index):
         """Entrega el estado de los contenidos en el elemento almacenado en la posición
         window_index de la ventana."""
 
         try:
             return self.window[window_index]["is_received"]
+        except IndexError:
+            raise Exception("ERROR in SlidingWindow, get_is_received(): Invalid index window_index")
+        except TypeError:
+            raise Exception("ERROR in SlidingWindow, get_is_received(): Index window_index must be an Integer")
+
+    def is_timeout(self, window_index):
+        """Entrega el estado de los contenidos en el elemento almacenado en la posición
+        window_index de la ventana."""
+
+        try:
+            return (time.time() - self.window[window_index]["send_time"]) >= self.timeout
         except IndexError:
             raise Exception("ERROR in SlidingWindow, get_is_received(): Invalid index window_index")
         except TypeError:

@@ -260,10 +260,53 @@ class SocketTCP:
                 except:
                     timeout = True
         
-
-    
     def send_using_selective_repeat(self, message: str):
-        pass
+        self.socket_tcp.setblocking(False)
+        # message setup
+        encoded_message = message.encode()
+        message_length = len(encoded_message)
+
+        # init message setup
+        init_message = str(message_length)
+
+        # slicing messages in 16 bytes
+        LA = self.seq
+        
+        sliced_data = [self.create_segment(1, 1, 1, self.seq, init_message)] #data_list
+        windows_range = 2*self.window_size
+        for i in range(0, math.ceil(message_length/16)):
+            slice_encoded_message = encoded_message[i*16:min((i+1)*16, message_length)]
+            self.seq = LA + (1 + i)%(windows_range)
+            sliced_data.append(self.create_segment(0, 0, 0, self.seq, slice_encoded_message.decode()))
+        self.seq = self.seq + 1
+        data_window = SlidingWindow.SlidingWindow(self.window_size, sliced_data, LA)
+        while data_window.get_data(0) is not None:
+            for i in range(self.window_size):
+                if data_window.is_received(i):
+                    data_window.move_window(1)
+                else:
+                    break
+            
+            for i in range(self.window_size):
+                if data_window.is_timeout(i) and not data_window.is_received(i):
+                    seq_number = data_window.get_sequence_number(i)
+                    if seq_number is None: break
+                    if self.DEBUG: print(f"-- SENDING MESSAGE, win_seq = {seq_number} -->", end="\n\n")
+                    self.socket_tcp.sendto(data_window.get_data(i).encode(), self.send_to)
+                    data_window.start_timer(i)
+            
+            try:
+                ack_message, ad = self.socket_tcp.recvfrom(1024) # self.seq is needed to continue
+            except BlockingIOError:
+                 # como nuestro socket no es bloqueante, si no llega nada entramos aquí y continuamos (hacemos esto en vez de usar threads)
+                 continue
+            else:
+                syn, ack, fin, rec_seq, data = self.parse_segment(ack_message.decode())
+                if self.DEBUG: print(f"-- RECEIVING ACK MESSAGE, seq = {rec_seq} -->", end="\n\n")
+                for i in range(self.window_size):
+                    if rec_seq == data_window.get_sequence_number(i):
+                        data_window.set_received(i)
+
 
     def recv_using_stop_and_wait(self, buff_size: int):     
         if len(self.temp) >= buff_size:
