@@ -30,10 +30,12 @@ class SlidingWindow:
         i = 0
         for i in range(self.window_size):
             if i >= len(self.data_list):
-                self.window.append({"data": None, "seq": None})
+                self.window.append({"data": None, "seq": None, 'is_received': None})
             else:
                 self.window.append({"data": self.data_list[i],
-                                    "seq": self.possible_sequence_numbers[i % (2 * self.window_size)]})
+                                    "seq": self.possible_sequence_numbers[i % (2 * self.window_size)],
+                                    "is_received": False
+                                    })
         self.data_start_index = i + 1
 
     def move_window(self, steps_to_move):
@@ -55,10 +57,12 @@ class SlidingWindow:
 
         for i in range(self.data_start_index, (self.window_size - len(new_window)) + self.data_start_index):
             if i >= len(self.data_list):
-                new_window.append({"data": None, "seq": None})
+                new_window.append({"data": None, "seq": None, "is_received": None})
             else:
                 new_window.append({"data": self.data_list[i],
-                                   "seq": self.possible_sequence_numbers[i % (2 * self.window_size)]})
+                                   "seq": self.possible_sequence_numbers[i % (2 * self.window_size)],
+                                   "is_received": False
+                                   })
             self.data_start_index += 1
 
         self.window = new_window
@@ -84,6 +88,18 @@ class SlidingWindow:
             raise Exception("ERROR in SlidingWindow, get_data(): Invalid index window_index")
         except TypeError:
             raise Exception("ERROR in SlidingWindow, get_data(): Index window_index must be an Integer")
+
+
+    def get_is_received(self, window_index):
+        """Entrega el estado de los contenidos en el elemento almacenado en la posición
+        window_index de la ventana."""
+
+        try:
+            return self.window[window_index]["is_received"]
+        except IndexError:
+            raise Exception("ERROR in SlidingWindow, get_is_received(): Invalid index window_index")
+        except TypeError:
+            raise Exception("ERROR in SlidingWindow, get_is_received(): Index window_index must be an Integer")
 
     def put_data(self, data, seq, window_index):
         """Añade un elemento a la ventana en la posición window_index con
