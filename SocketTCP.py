@@ -28,6 +28,7 @@ class SocketTCP:
         self.window_size = 3
         self.init_seq = None
         self.seq_win = 0
+        self.last_ack = None
 
     def parse_segment(self, segment):
         """
@@ -435,6 +436,7 @@ class SocketTCP:
 
                         ack_message = self.create_segment(0, 1, 0, self.seq, "")
                         self.socket_tcp.sendto(ack_message.encode(), self.send_to)
+                        self.last_ack = ack_message
 
                         self.seq_win = (self.seq_win + 1)%(2*self.window_size)
                         self.seq = self.init_seq + self.seq_win
@@ -459,6 +461,8 @@ class SocketTCP:
         curr_attemps = 0
         while True:
             if self.DEBUG: print(f'-- SENDING FIN, seq = {self.seq} -->', end="\n\n")
+            if self.last_ack is not None:
+                self.socket_tcp.sendto(self.last_ack.encode(), self.send_to)
             self.socket_tcp.sendto(syn_message.encode(), self.send_to)
 
             try:
