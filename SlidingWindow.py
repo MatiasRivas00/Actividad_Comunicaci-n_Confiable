@@ -84,6 +84,18 @@ class SlidingWindow:
         except TypeError:
             raise Exception("ERROR in SlidingWindow, get_sequence_number(): Index window_index must be an Integer")
 
+
+    def set_data(self, window_index, data):
+        """Entrega los datos contenidos en el elemento almacenado en la posición
+        window_index de la ventana."""
+
+        try:
+            self.window[window_index]["data"] = data
+        except IndexError:
+            raise Exception("ERROR in SlidingWindow, get_data(): Invalid index window_index")
+        except TypeError:
+            raise Exception("ERROR in SlidingWindow, get_data(): Index window_index must be an Integer")
+
     def get_data(self, window_index):
         """Entrega los datos contenidos en el elemento almacenado en la posición
         window_index de la ventana."""

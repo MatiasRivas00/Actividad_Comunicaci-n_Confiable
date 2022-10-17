@@ -7,5 +7,5 @@ message = ''.join(sys.stdin.readlines())
 # client
 client_socketTCP = SocketTCP.SocketTCP()
 client_socketTCP.connect((ip, int(port)))
-client_socketTCP.send(message, mode=1)
+client_socketTCP.send(message, mode=2)
 client_socketTCP.close()
