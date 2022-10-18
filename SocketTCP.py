@@ -30,6 +30,10 @@ class SocketTCP:
         self.seq_win = 0
         self.last_ack = None
         self.recv_windows = None
+        self.number_of_sent_segments = 0
+    
+    def set_window_size(self, window_size):
+        self.window_size = window_size
 
     def parse_segment(self, segment):
         """
@@ -158,7 +162,7 @@ class SocketTCP:
             self.send_using_go_back_n,
             self.send_using_selective_repeat]
 
-        send_options[mode](message)
+        return send_options[mode](message)
 
     def recv(self, buff_size, mode=0):
         """
@@ -200,6 +204,7 @@ class SocketTCP:
             while not ok:
                 try:
                     if self.DEBUG: print(f"-- SENDING MESSAGE, seq = {self.seq - 1} -->", end="\n\n")
+                    self.number_of_sent_segments += 1
                     self.socket_tcp.sendto(enconded_segment, self.send_to)
                     ack_message, ad = self.socket_tcp.recvfrom(1024) # self.seq + 1 is needed to continue
                     syn, ack, fin, rec_seq, data = self.parse_segment(ack_message.decode())
@@ -209,6 +214,9 @@ class SocketTCP:
                         ok = True
                 except Exception as e:
                     if self.ERROR_DEBUG: print(f"<-- RECEIVING ACK FAILED, SENDING MESSAGE AGAIN --", end="\n\n")
+        number_of_sent_segments = self.number_of_sent_segments
+        self.number_of_sent_segments = 0
+        return number_of_sent_segments
 
     def send_using_go_back_n(self, message: str):
         self.socket_tcp.settimeout(5)
@@ -238,6 +246,7 @@ class SocketTCP:
                 seq_number = data_window.get_sequence_number(i)
                 if seq_number is None: break
                 if self.DEBUG: print(f"-- SENDING MESSAGE, win_seq = {seq_number} -->", end="\n\n")
+                self.number_of_sent_segments += 1
                 self.socket_tcp.sendto(data_window.get_data(i).encode(), self.send_to)
             while not timeout:
                 try:
@@ -254,6 +263,7 @@ class SocketTCP:
                         seq_number = data_window.get_sequence_number(self.window_size - 1)
                         if seq_number is None: break
                         if self.DEBUG: print(f"-- SENDING MESSAGE, win_seq = {seq_number} -->", end="\n\n")
+                        self.number_of_sent_segments += 1
                         self.socket_tcp.sendto(data_window.get_data(self.window_size - 1).encode(), self.send_to)
                     LA = rec_seq # Last Acknowledge
 
@@ -261,6 +271,9 @@ class SocketTCP:
                     if data_window.get_data(0) is None: break
                 except:
                     timeout = True
+        number_of_sent_segments = self.number_of_sent_segments
+        self.number_of_sent_segments = 0
+        return number_of_sent_segments
         
     def send_using_selective_repeat(self, message: str):
         self.socket_tcp.setblocking(False)
@@ -276,8 +289,8 @@ class SocketTCP:
         
         sliced_data = [self.create_segment(1, 1, 1, self.seq, init_message)] #data_list
         windows_range = 2*self.window_size
-        for i in range(0, math.ceil(message_length/16)):
-            slice_encoded_message = encoded_message[i*16:min((i+1)*16, message_length)]
+        for i in range(0, math.ceil(message_length/64)):
+            slice_encoded_message = encoded_message[i*64:min((i+1)*64, message_length)]
             self.seq = LA + (1 + i)%(windows_range)
             sliced_data.append(self.create_segment(0, 0, 0, self.seq, slice_encoded_message.decode()))
         self.seq = self.seq + 1
@@ -294,6 +307,7 @@ class SocketTCP:
                     seq_number = data_window.get_sequence_number(i)
                     if seq_number is None: break
                     if self.DEBUG: print(f"-- SENDING MESSAGE, win_seq = {seq_number} -->", end="\n\n")
+                    self.number_of_sent_segments += 1
                     self.socket_tcp.sendto(data_window.get_data(i).encode(), self.send_to)
                     data_window.start_timer(i)
             
@@ -308,7 +322,9 @@ class SocketTCP:
                 for i in range(self.window_size):
                     if rec_seq == data_window.get_sequence_number(i):
                         data_window.set_received(i)
-
+        number_of_sent_segments = self.number_of_sent_segments
+        self.number_of_sent_segments = 0
+        return number_of_sent_segments
 
     def recv_using_stop_and_wait(self, buff_size: int):     
         if len(self.temp) >= buff_size:
@@ -533,7 +549,7 @@ class SocketTCP:
                             ack_message = self.create_segment(0, 1, 0, self.seq, "")
                             self.socket_tcp.sendto(ack_message.encode(), self.send_to)
 
-                            self.recv_windows = SlidingWindow.SlidingWindow(self.window_size, ["Dummy" for i in range(math.ceil(self.message_length/16))] + ["Dummy"], self.seq)
+                            self.recv_windows = SlidingWindow.SlidingWindow(self.window_size, ["Dummy" for i in range(math.ceil(self.message_length/64))] + ["Dummy"], self.seq)
                             self.recv_windows.move_window(1)
 
 
