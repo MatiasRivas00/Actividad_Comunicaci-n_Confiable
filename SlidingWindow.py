@@ -34,12 +34,13 @@ class SlidingWindow:
         i = 0
         for i in range(self.window_size):
             if i >= len(self.data_list):
-                self.window.append({"data": None, "seq": None, 'is_received': None, "send_time": 0})
+                self.window.append({"data": None, "seq": None, 'is_received': None, "send_time": 0, "dummy": False})
             else:
                 self.window.append({"data": self.data_list[i],
                                     "seq": self.possible_sequence_numbers[i % (2 * self.window_size)],
                                     "is_received": False,
-                                    "send_time": 0
+                                    "send_time": 0,
+                                    "dummy": False
                                     })
         self.data_start_index = i + 1
 
@@ -62,16 +63,37 @@ class SlidingWindow:
 
         for i in range(self.data_start_index, (self.window_size - len(new_window)) + self.data_start_index):
             if i >= len(self.data_list):
-                new_window.append({"data": None, "seq": None, "is_received": None, "send_time": 0})
+                new_window.append({"data": None, "seq": None, "is_received": None, "send_time": 0, "dummy":False})
             else:
                 new_window.append({"data": self.data_list[i],
                                    "seq": self.possible_sequence_numbers[i % (2 * self.window_size)],
                                    "is_received": False,
-                                   "send_time": 0
+                                   "send_time": 0,
+                                   "dummy": False
                                    })
             self.data_start_index += 1
 
         self.window = new_window
+
+    def set_dummy(self, window_index, value):
+        """Entrega los datos contenidos en el elemento almacenado en la posición
+        window_index de la ventana."""
+
+        try:
+            self.window[window_index]["dummy"] = value
+        except IndexError:
+            raise Exception("ERROR in SlidingWindow, set_dummy(): Invalid index window_index")
+    
+    def get_dummy(self, window_index):
+        """Entrega el número de secuencia del elemento almacenado en la posición
+        window_index de la ventana."""
+
+        try:
+            return self.window[window_index]["dummy"]
+        except IndexError:
+            raise Exception("ERROR in SlidingWindow, get_sequence_number(): Invalid index window_index")
+        except TypeError:
+            raise Exception("ERROR in SlidingWindow, get_sequence_number(): Index window_index must be an Integer")
 
     def get_sequence_number(self, window_index):
         """Entrega el número de secuencia del elemento almacenado en la posición

@@ -80,6 +80,7 @@ class SocketTCP:
                     self.seq = rec_seq + 1
                     self.init_seq = self.seq
                     ack_message = self.create_segment(0, 1, 0, self.seq, "")
+                    self.last_ack = ack_message
                     self.socket_tcp.sendto(ack_message.encode(), address)
                     self.send_to = eval(data)
                     ok = True
@@ -232,45 +233,37 @@ class SocketTCP:
         
         sliced_data = [self.create_segment(1, 1, 1, self.seq, init_message)] #data_list
         windows_range = 2*self.window_size
-        for i in range(0, math.ceil(message_length/16)):
+        for i in range(math.ceil(message_length/16)):
             slice_encoded_message = encoded_message[i*16:min((i+1)*16, message_length)]
             self.seq = LA + (1 + i)%(windows_range)
             sliced_data.append(self.create_segment(0, 0, 0, self.seq, slice_encoded_message.decode()))
         self.seq = self.seq + 1
         data_window = SlidingWindow.SlidingWindow(self.window_size, sliced_data, LA)
-        LA = LA - 1
-        timeout = False
         while data_window.get_data(0) is not None:
-            timeout = False
+            max_advanced = -1
             for i in range(self.window_size):
-                seq_number = data_window.get_sequence_number(i)
-                if seq_number is None: break
-                if self.DEBUG: print(f"-- SENDING MESSAGE, win_seq = {seq_number} -->", end="\n\n")
-                self.number_of_sent_segments += 1
-                self.socket_tcp.sendto(data_window.get_data(i).encode(), self.send_to)
-            while not timeout:
-                try:
-                    ack_message, ad = self.socket_tcp.recvfrom(1024) # self.seq is needed to continue
-                    syn, ack, fin, rec_seq, data = self.parse_segment(ack_message.decode())
-                    if self.DEBUG: print(f"-- RECEIVING ACK MESSAGE, seq = {rec_seq} -->", end="\n\n")
-                    moves = 0
-                    if LA <= rec_seq:
-                        moves = rec_seq - LA # Ej: LA = 13, A = 14 => windows moves 1
-                    if LA > rec_seq:
-                        moves = (2*self.window_size - LA) + rec_seq 
-                    for j in range(moves): # 9 10 11 12 13 14 9 10 11 12 13 14
-                        data_window.move_window(1)
-                        seq_number = data_window.get_sequence_number(self.window_size - 1)
-                        if seq_number is None: break
-                        if self.DEBUG: print(f"-- SENDING MESSAGE, win_seq = {seq_number} -->", end="\n\n")
-                        self.number_of_sent_segments += 1
-                        self.socket_tcp.sendto(data_window.get_data(self.window_size - 1).encode(), self.send_to)
-                    LA = rec_seq # Last Acknowledge
+                if data_window.is_received(i):
+                    max_advanced = i
+            
+            data_window.move_window(max_advanced + 1)
 
-                    
-                    if data_window.get_data(0) is None: break
-                except:
-                    timeout = True
+            for i in range(self.window_size):
+                if not data_window.get_dummy(i) and data_window.get_data(i) is not None: # El dummy es utilizado para saber si un mensaje ya fue enviado antes de un timeout
+                    self.number_of_sent_segments += 1
+                    self.socket_tcp.sendto(data_window.get_data(i).encode(), self.send_to)
+                    if self.DEBUG: print(f"-- SENDING MESSAGE, win_seq = {data_window.get_sequence_number(i)} -->", end="\n\n")
+                    data_window.set_dummy(i, True)
+            try:
+                ack_message, ad = self.socket_tcp.recvfrom(1024) 
+                syn, ack, fin, rec_seq, data = self.parse_segment(ack_message.decode())
+                if self.DEBUG: print(f"-- RECEIVING ACK MESSAGE, seq = {rec_seq} -->", end="\n\n")
+                for i in range(self.window_size):
+                    if rec_seq == data_window.get_sequence_number(i):
+                        data_window.set_received(i)
+                        
+            except:
+                for i in range(self.window_size):
+                    data_window.set_dummy(i, False)
         number_of_sent_segments = self.number_of_sent_segments
         self.number_of_sent_segments = 0
         return number_of_sent_segments
@@ -460,6 +453,9 @@ class SocketTCP:
 
                 except Exception as e:
                     if self.ERROR_DEBUG: print(f"<-- RECEIVING MESSAGE FAILED, TRYING AGAIN --", end="\n\n")
+                    if self.last_ack is not None:
+                        self.socket_tcp.sendto(self.last_ack.encode(), self.send_to)
+                        if self.DEBUG: print(f"-- SENDING ACK {self.last_ack} -->", end="\n\n")
 
             ans = self.temp[:min(buff_size, len(self.temp))]
             self.temp = self.temp[min(buff_size, len(self.temp)):]
@@ -567,14 +563,14 @@ class SocketTCP:
     def close(self):
         
         seq = self.seq
-        syn_message = self.create_segment(0, 0, 1, seq, "")
+        fin_message = self.create_segment(0, 0, 1, seq, "")
         MAX_ATTEMPS = 3
         curr_attemps = 0
         while True:
             if self.DEBUG: print(f'-- SENDING FIN, seq = {self.seq} -->', end="\n\n")
             if self.last_ack is not None:
                 self.socket_tcp.sendto(self.last_ack.encode(), self.send_to)
-            self.socket_tcp.sendto(syn_message.encode(), self.send_to)
+            self.socket_tcp.sendto(fin_message.encode(), self.send_to)
 
             try:
                 fin_ack_message, server_adress = self.socket_tcp.recvfrom(1024) 
@@ -601,10 +597,3 @@ class SocketTCP:
                     self.socket_tcp.close()
                     return
                 if self.ERROR_DEBUG: print(f"<-- RECEIVING FIN + ACK FAILED, TRYING AGAIN --", end="\n\n")
-        '''
-        1. Mandar una segmento con FIN 1
-        2. verificar que me llega un mensaje con FIN + ACK (el recv tiene que hacer esto)
-        3. Mandar un mensaje ACK de respuesta
-        4. Cerrar la conexion
-        '''
-        pass
