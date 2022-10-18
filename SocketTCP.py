@@ -462,7 +462,7 @@ class SocketTCP:
                 try:    
                     em_message, sender_address = self.socket_tcp.recvfrom(1024)
                     syn, ack, fin, rec_seq, data = self.parse_segment(em_message.decode())
-                    if self.DEBUG: print(f"<-- RECEIVING MESSAGE, seq = {rec_seq} -- expected = {self.seq}", end="\n\n")
+                    if self.DEBUG: print(f"<-- RECEIVING MESSAGE, seq = {rec_seq}", end="\n\n")
 
                     if (syn, ack, fin, rec_seq, data) == (0, 0, 1, self.seq, ""):
                         if self.DEBUG: print(f"<-- FIN MESSAGE, seq = {rec_seq} --", end="\n\n")
@@ -500,10 +500,11 @@ class SocketTCP:
                             if self.recv_windows.is_received(i) and self.recv_windows.get_sequence_number(i) is not None:
                                 window_data = self.recv_windows.get_data(i)
                                 self.temp.extend(window_data.encode())
-                                self.message_length = self.message_length - len(data.encode())
+                                self.message_length = self.message_length - len(window_data.encode())
                                 ok = not (len(self.temp) < buff_size and self.message_length > 0)
-                                self.recv_windows.move_window(1)
                                 self.seq = self.recv_windows.get_sequence_number(i)
+                                if self.DEBUG: print(f"<-- Curr seq = {self.seq}", end="\n\n")
+                                self.recv_windows.move_window(1)
                             else:
                                 break
                         
@@ -511,14 +512,18 @@ class SocketTCP:
                         for i in range(self.window_size):
                             recv_seq_number = self.recv_windows.get_sequence_number(i)
                             if recv_seq_number == rec_seq:
+                                #if self.DEBUG: print(f"<-- RECEIVING seq = {recv_seq_number}", end="\n\n")
                                 self.recv_windows.set_received(i)
                                 self.recv_windows.set_data(i, data)
+                                if self.DEBUG: print(f"-- SENDING ACK MESSAGE, seq = {rec_seq} -->", end="\n\n")
+                                ack_message = self.create_segment(0, 1, 0, rec_seq, "")
+                                self.socket_tcp.sendto(ack_message.encode(), self.send_to)
                                 find = True
 
                         if not find:
                             ack_message = self.create_segment(0, 1, 0, rec_seq, "")
                             self.socket_tcp.sendto(ack_message.encode(), self.send_to)
-                            self.last_ack = ack_message
+                            
                     elif rec_seq == self.seq and self.recv_windows is None:
                         if (syn, ack, fin) == (1, 1, 1):
                             self.message_length = int(data)
@@ -527,13 +532,13 @@ class SocketTCP:
 
                             ack_message = self.create_segment(0, 1, 0, self.seq, "")
                             self.socket_tcp.sendto(ack_message.encode(), self.send_to)
-                            self.last_ack = ack_message
 
                             self.recv_windows = SlidingWindow.SlidingWindow(self.window_size, ["Dummy" for i in range(math.ceil(self.message_length/16))] + ["Dummy"], self.seq)
                             self.recv_windows.move_window(1)
 
 
                 except Exception as e:
+                    print(e)
                     if self.ERROR_DEBUG: print(f"<-- RECEIVING MESSAGE FAILED, TRYING AGAIN --", end="\n\n")
 
             ans = self.temp[:min(buff_size, len(self.temp))]
